@@ -70,12 +70,39 @@ app.get("/services/:id", async(req,res)=>{
 })
 app.patch("/services/:id", async(req,res)=>{
     const {id} = await req.params
-    const result = await servicesCollection.updateOne({_id : new ObjectId(id)},{ $set: updateData (id)})
+    const updateData = req.body
+    const result = await servicesCollection.updateOne({_id : new ObjectId(id)},{ $set: updateData })
     res.status(200).send(result)
 })
 app.delete("/services/:id", async(req,res)=>{
     const {id} = await req.params
     const result = await servicesCollection.deleteOne({_id : new ObjectId(id)})
+    res.status(200).send(result)
+})
+
+app.get("/bookings", async(req,res)=>{
+    const result = await bookingsCollection.find().toArray()
+    res.status(200).send(result)
+})
+app.get("/bookings/:id", async(req,res)=>{
+    const {id} = await req.params
+    const result = await bookingsCollection.findOne({_id : new ObjectId(id)})
+    res.status(200).send(result)
+})
+app.post("/bookings", async(req,res)=>{
+    const newBooking = req.body
+    const result = await bookingsCollection.insertOne(newBooking)
+    res.status(200).send(result)
+})
+app.patch("/bookings/:id", async(req,res)=>{
+    const {id} = await req.params
+    const updateData = req.body
+    const result = await bookingsCollection.updateOne({_id : new ObjectId(id)},{ $set: updateData })
+    res.status(200).send(result)
+})
+app.delete("/bookings/:id", async(req,res)=>{
+    const {id} = await req.params
+    const result = await bookingsCollection.deleteOne({_id : new ObjectId(id)})
     res.status(200).send(result)
 })
 
