@@ -4,7 +4,7 @@ import 'dotenv/config';
 import { MongoClient, ObjectId } from "mongodb";
 
 const app = express()
-const PORT = 5000
+const PORT = process.env.PORT || 5000
 app.use(express.json())
 app.use(cors())
 const DB_URI = process.env.DATABASE_URL;
@@ -26,6 +26,7 @@ const db = mongoClient.db("WedPlan")
 const servicesCollection = db.collection("Services")
 const usersCollection = db.collection("user")
 const bookingsCollection = db.collection("Bookings")
+const bookmarksCollection = db.collection("Bookmarks")
 
 
 app.get("/users", async(req,res)=>{
@@ -111,6 +112,21 @@ app.delete("/bookings/:id", async(req,res)=>{
     res.status(200).send(result)
 })
 
+app.get("/bookmarks", async(req,res)=>{
+    const result = await bookmarksCollection.find().toArray()
+    res.status(200).send(result)
+    
+})
+app.post("/bookmarks", async(req,res)=>{
+    const newBookmark = req.body
+    const result = await bookmarksCollection.insertOne(newBookmark)
+    res.status(200).send(result)
+})
+app.delete("/bookmarks/:id", async(req,res)=>{
+    const {id} = await req.params
+    const result = await bookmarksCollection.deleteOne({_id : new ObjectId(id)})
+    res.status(200).send(result)
+})
 
 app.get("/",(req,res)=>{
     res.status(200).send({massage: "Welcome to express backend!"})
