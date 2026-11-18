@@ -79,6 +79,11 @@ app.delete("/services/:id", async(req,res)=>{
     const result = await servicesCollection.deleteOne({_id : new ObjectId(id)})
     res.status(200).send(result)
 })
+app.post("/services", async(req,res)=>{
+    const newService = req.body
+    const result = await servicesCollection.insertOne(newService)
+    res.status(200).send(result)
+})
 
 app.get("/bookings", async(req,res)=>{
     const result = await bookingsCollection.find().toArray()
