@@ -25,6 +25,7 @@ const mongoClient = await connectToMongoDB()
 const db = mongoClient.db("WedPlan")
 const servicesCollection = db.collection("Services")
 const usersCollection = db.collection("user")
+const bookingsCollection = db.collection("Bookings")
 
 
 app.get("/users", async(req,res)=>{
@@ -65,6 +66,16 @@ app.get("/services", async(req,res)=>{
 app.get("/services/:id", async(req,res)=>{
     const {id} = await req.params
     const result = await servicesCollection.findOne({_id : new ObjectId(id)})
+    res.status(200).send(result)
+})
+app.patch("/services/:id", async(req,res)=>{
+    const {id} = await req.params
+    const result = await servicesCollection.updateOne({_id : new ObjectId(id)},{ $set: updateData (id)})
+    res.status(200).send(result)
+})
+app.delete("/services/:id", async(req,res)=>{
+    const {id} = await req.params
+    const result = await servicesCollection.deleteOne({_id : new ObjectId(id)})
     res.status(200).send(result)
 })
 
