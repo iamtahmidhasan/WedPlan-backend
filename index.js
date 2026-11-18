@@ -23,10 +23,55 @@ export async function connectToMongoDB(){
 
 const mongoClient = await connectToMongoDB()
 const db = mongoClient.db("WedPlan")
+const servicesCollection = db.collection("Services")
+const usersCollection = db.collection("user")
 
 
+app.get("/users", async(req,res)=>{
+    const result = await usersCollection.find().toArray()
+    res.status(200).send(result)
+})
+app.get("/users/:id", async (req, res) => {
+    const { id } = req.params;
+    const query = { _id: new ObjectId(id) }
+
+    const result = await usersCollection.findOne(query);
+    if (!result) {
+        return res.status(404).send({ error: "User not found" });
+    }
+    res.send(result);
+});
+
+app.patch("/users/:id", async (req, res) => {
+    const { id } = req.params;
+    const updateData = req.body;
+
+    const query ={ _id: new ObjectId(id) }
+
+    const result = await usersCollection.updateOne(query, { $set: updateData });
+    res.send(result);
+});
+app.delete("/users/:id", async (req, res) => {
+    const { id } = req.params;
+    const query = { _id: new ObjectId(id) }
+    const result = await usersCollection.deleteOne(query);
+    res.status(200).send(result);
+});
+
+app.get("/services", async(req,res)=>{
+    const result = await servicesCollection.find().toArray()
+    res.status(200).send(result)
+})
+app.get("/services/:id", async(req,res)=>{
+    const {id} = await req.params
+    const result = await servicesCollection.findOne({_id : new ObjectId(id)})
+    res.status(200).send(result)
+})
 
 
+app.get("/",(req,res)=>{
+    res.status(200).send({massage: "Welcome to express backend!"})
+})
 
 
 app.listen(PORT,()=>{
