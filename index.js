@@ -37,14 +37,23 @@ const verifyToken = async (req, res, next) => {
     return res.status(401).send({ message: "Unauthorized" });
   }
 
-  const token = header.slice(7);
+  const token = header.split(" ")[1];
   const session = await sessionsCollection.findOne({ token });
-  if (!session) return res.status(401).send({ message: "Unauthorized" });
+  if (
+    !session ||
+    !session.expiresAt ||
+    new Date(session.expiresAt) <= new Date()
+  ) {
+    return res.status(401).send({ message: "Unauthorized" });
+  }
 
   const user = await usersCollection.findOne({
     _id: new ObjectId(session.userId),
   });
   if (!user) return res.status(401).send({ message: "Unauthorized" });
+  if (user.isBlocked) {
+    return res.status(403).send({ message: "Account blocked" });
+  }
 
   req.user = user;
   req.userId = String(user._id);
@@ -140,7 +149,33 @@ app.get("/users", verifyToken, async (req, res) => {
       : res.status(404).send({ error: "User not found" });
   }
 
-  const query = req.role === "customer" ? { _id: new ObjectId(req.userId) } : {};
+  let query = {};
+  if (req.role === "customer") {
+    query = { _id: new ObjectId(req.userId) };
+  } else if (req.role === "vendor") {
+    const services = await servicesCollection
+      .find({ vendorId: req.userId })
+      .toArray();
+    const bookings = await bookingsCollection
+      .find({
+        $or: [
+          { vendorId: req.userId },
+          { serviceId: { $in: services.map((service) => String(service._id)) } },
+        ],
+      })
+      .toArray();
+
+    const userIds = new Set([req.userId]);
+    for (const booking of bookings) {
+      if (booking.customerId) userIds.add(booking.customerId);
+      if (booking.vendorId) userIds.add(booking.vendorId);
+    }
+    const ids = [...userIds]
+      .filter((id) => /^[a-f\d]{24}$/i.test(id))
+      .map((id) => new ObjectId(id));
+    query = { _id: { $in: ids } };
+  }
+
   res.send(await usersCollection.find(query).toArray());
 });
 
@@ -152,7 +187,8 @@ app.patch("/users", verifyToken, async (req, res) => {
 
   let updateData = req.body;
   if (req.role !== "admin") {
-    const { role, isBlocked, isPremium, ...rest } = req.body;
+    const { role, isBlocked, isPremium, emailVerified, email, ...rest } =
+      req.body;
     updateData = role && role !== "admin" ? { ...rest, role } : rest;
   }
 
@@ -222,7 +258,25 @@ app.patch("/bookings", verifyToken, async (req, res) => {
     return res.status(403).send({ message: "Forbidden" });
   }
 
-  res.send(await bookingsCollection.updateOne({ _id: id }, { $set: req.body }));
+  let updateData = req.body;
+  if (req.role === "customer") {
+    if (req.body.status && !["pending", "cancelled"].includes(req.body.status)) {
+      return res.status(403).send({ message: "Forbidden" });
+    }
+  }
+  if (req.role !== "admin") {
+    const keys =
+      req.role === "customer"
+        ? ["eventDate", "eventLocation", "message", "status"]
+        : ["status"];
+    updateData = Object.fromEntries(
+      keys.filter((key) => key in req.body).map((key) => [key, req.body[key]]),
+    );
+  }
+
+  res.send(
+    await bookingsCollection.updateOne({ _id: id }, { $set: updateData }),
+  );
 });
 
 app.delete("/bookings", verifyToken, async (req, res) => {
