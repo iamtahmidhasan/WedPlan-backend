@@ -667,6 +667,48 @@ app.delete("/categories/:id", verifyToken, async (req, res) => {
   res.send({ message: "Category deleted successfully" });
 });
 
+
+app.post(['/ai-chat', '/api/ai-chat'], async (req, res) => {
+  const { userMessage } = req.body;
+
+  const services = await servicesCollection.find(
+    { $or: [{ status: 'approved' }, { status: { $exists: false } }] },
+    { projection: { serviceName: 1, category: 1, price: 1, location: 1, description: 1, images: 1, _id: 1 } }
+  ).limit(30).toArray();
+
+  const systemPrompt = `
+    You are WedPlan's helpful AI Wedding Assistant. 
+    Below is the list of available wedding services in JSON format:
+    ${JSON.stringify(services)}
+
+    Rules:
+    - Answer the user's query warmly, concisely, and helpfully.
+    - When recommending services, write a friendly intro and include the service link tags (e.g. /services/[_id]).
+    - Do NOT write plain-text details like "Price: $...", "Location: ...", or "Link: /services/..." because our UI automatically renders rich interactive service cards with photos, prices, locations, and booking buttons for each service link!
+    - If no services match, politely inform the user.
+    - Keep responses concise and natural.
+  `;
+
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: "deepseek/deepseek-chat", 
+      max_tokens: 600,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage }
+      ]
+    })
+  });
+
+  const data = await response.json();
+  res.json({ reply: data.choices?.[0]?.message?.content, services });
+});
+
 app.listen(PORT, () => {
   console.log("backend running on port", PORT);
 });
