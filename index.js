@@ -30,6 +30,104 @@ const sessionsCollection = db.collection("session");
 const bookingsCollection = db.collection("Bookings");
 const bookmarksCollection = db.collection("Bookmarks");
 const transactionsCollection = db.collection("Transactions");
+const categoriesCollection = db.collection("Categories");
+
+const defaultCategories = [
+  {
+    name: "Photography & Videography",
+    description: "Candid emotional portraits, drone visuals & cinematic wedding films.",
+    image: "https://images.unsplash.com/photo-1537633552985-df8429e8048b?auto=format&fit=crop&w=800&q=80",
+    icon: "Camera",
+  },
+  {
+    name: "Wedding Venues",
+    description: "Historic estates, rustic barns, seaside villas & luxury ballrooms.",
+    image: "https://images.unsplash.com/photo-1519167758481-83f550bb49b3?auto=format&fit=crop&w=800&q=80",
+    icon: "Home",
+  },
+  {
+    name: "Decoration & Florist",
+    description: "Bespoke floral arches, candlelit tablescapes & ambient installations.",
+    image: "https://images.unsplash.com/photo-1526047932273-341f2a7631f9?auto=format&fit=crop&w=800&q=80",
+    icon: "Flower2",
+  },
+  {
+    name: "Catering Services",
+    description: "Artisanal multi-course dining, custom cocktails & wedding bakeries.",
+    image: "https://images.unsplash.com/photo-1555244162-803834f70033?auto=format&fit=crop&w=800&q=80",
+    icon: "Utensils",
+  },
+  {
+    name: "Makeup & Styling",
+    description: "Bridal hair artistry, luminous glam & wedding morning wellness.",
+    image: "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?auto=format&fit=crop&w=800&q=80",
+    icon: "Sparkles",
+  },
+  {
+    name: "Wedding Fashion",
+    description: "Couture gowns, modern tailored suits, veil designs & bridal jewelry.",
+    image: "https://images.unsplash.com/photo-1594552072238-b8a33785b261?auto=format&fit=crop&w=800&q=80",
+    icon: "Shirt",
+  },
+];
+
+async function initCategories() {
+  try {
+    // 1. Seed initial categories if not exists
+    for (const cat of defaultCategories) {
+      const escaped = cat.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const exists = await categoriesCollection.findOne({
+        name: { $regex: `^${escaped}$`, $options: "i" },
+      });
+      if (!exists) {
+        await categoriesCollection.insertOne({
+          ...cat,
+          createdAt: new Date(),
+        });
+      }
+    }
+
+    // 2. Preserve any existing categories already stored in Services
+    const serviceCategories = await servicesCollection.distinct("category");
+    for (const catName of serviceCategories) {
+      if (catName && typeof catName === "string" && catName.trim()) {
+        const trimmed = catName.trim();
+        const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const exists = await categoriesCollection.findOne({
+          name: { $regex: `^${escaped}$`, $options: "i" },
+        });
+        if (!exists) {
+          await categoriesCollection.insertOne({
+            name: trimmed,
+            description: `${trimmed} services`,
+            image: "https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=800&q=80",
+            icon: "Sparkles",
+            createdAt: new Date(),
+          });
+        }
+      }
+    }
+
+    // 3. Add categoryId to any service that currently lacks it
+    const allCategories = await categoriesCollection.find({}).toArray();
+    for (const cat of allCategories) {
+      const escaped = cat.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      await servicesCollection.updateMany(
+        {
+          categoryId: { $exists: false },
+          category: { $regex: `^${escaped}$`, $options: "i" },
+        },
+        {
+          $set: { categoryId: String(cat._id) },
+        }
+      );
+    }
+  } catch (err) {
+    console.error("Categories initialization error:", err);
+  }
+}
+
+await initCategories();
 
 const verifyToken = async (req, res, next) => {
   const header = req.headers.authorization;
@@ -93,13 +191,22 @@ app.get("/services", async (req, res) => {
     query.status = req.query.status;
   }
   if (req.query.search && req.query.search.trim()) {
-    query.serviceName = { $regex: req.query.search.trim(), $options: "i" };
+    const escapedSearch = req.query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    query.serviceName = { $regex: escapedSearch, $options: "i" };
+  }
+  if (req.query.categoryId) {
+    query.categoryId = req.query.categoryId;
   }
   if (req.query.category && req.query.category !== "all") {
-    query.category = { $regex: req.query.category.trim(), $options: "i" };
+    const escapedCat = req.query.category.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    query.$or = [
+      { category: { $regex: escapedCat, $options: "i" } },
+      { categoryId: req.query.category },
+    ];
   }
   if (req.query.location && req.query.location !== "all") {
-    query.location = { $regex: req.query.location.trim(), $options: "i" };
+    const escapedLoc = req.query.location.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    query.location = { $regex: escapedLoc, $options: "i" };
   }
 
   let sortOption = {};
@@ -119,8 +226,28 @@ app.post("/services", verifyToken, async (req, res) => {
     return res.status(403).send({ message: "Forbidden" });
   }
 
+  let categoryId = req.body.categoryId;
+  let categoryName = req.body.category;
+
+  if (categoryId && ObjectId.isValid(categoryId)) {
+    const catDoc = await categoriesCollection.findOne({ _id: new ObjectId(categoryId) });
+    if (catDoc) {
+      categoryName = catDoc.name;
+    }
+  } else if (categoryName) {
+    const catDoc = await categoriesCollection.findOne({
+      name: { $regex: `^${categoryName.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" },
+    });
+    if (catDoc) {
+      categoryId = String(catDoc._id);
+      categoryName = catDoc.name;
+    }
+  }
+
   const newService = {
     ...req.body,
+    category: categoryName || req.body.category,
+    categoryId: categoryId || req.body.categoryId,
     status: req.role === "admin" ? (req.body.status || "approved") : "pending",
     vendorId: req.role === "admin" ? req.body.vendorId : req.userId,
     createdAt: new Date(),
@@ -136,7 +263,24 @@ app.patch("/services", verifyToken, async (req, res) => {
     return res.status(403).send({ message: "Forbidden" });
   }
 
-  res.send(await servicesCollection.updateOne({ _id: id }, { $set: req.body }));
+  const updates = { ...req.body };
+  if (updates.categoryId && ObjectId.isValid(updates.categoryId)) {
+    const catDoc = await categoriesCollection.findOne({ _id: new ObjectId(updates.categoryId) });
+    if (catDoc) {
+      updates.category = catDoc.name;
+      updates.categoryId = String(catDoc._id);
+    }
+  } else if (updates.category) {
+    const catDoc = await categoriesCollection.findOne({
+      name: { $regex: `^${updates.category.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" },
+    });
+    if (catDoc) {
+      updates.categoryId = String(catDoc._id);
+      updates.category = catDoc.name;
+    }
+  }
+
+  res.send(await servicesCollection.updateOne({ _id: id }, { $set: updates }));
 });
 
 app.delete("/services", verifyToken, async (req, res) => {
@@ -429,6 +573,98 @@ app.get("/vendors/:id", verifyToken, async (req, res) => {
   }
 
   res.send(vendor);
+});
+
+app.get("/categories", async (req, res) => {
+  try {
+    const categories = await categoriesCollection.find({}).sort({ name: 1 }).toArray();
+    res.send(categories);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to fetch categories", error });
+  }
+});
+
+app.post("/categories", verifyToken, async (req, res) => {
+  if (req.role !== "admin") {
+    return res.status(403).send({ message: "Forbidden: Admin access required" });
+  }
+
+  const { name, description, image, icon } = req.body;
+  if (!name || typeof name !== "string" || !name.trim()) {
+    return res.status(400).send({ message: "Category name is required" });
+  }
+
+  const trimmedName = name.trim();
+  const escaped = trimmedName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const existing = await categoriesCollection.findOne({
+    name: { $regex: `^${escaped}$`, $options: "i" },
+  });
+  if (existing) {
+    return res.status(409).send({ message: "Category already exists" });
+  }
+
+  const newCategory = {
+    name: trimmedName,
+    description: description?.trim() || "",
+    image: image?.trim() || "https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=800&q=80",
+    icon: icon?.trim() || "Sparkles",
+    createdAt: new Date(),
+  };
+  const result = await categoriesCollection.insertOne(newCategory);
+  res.status(201).send({ ...newCategory, _id: result.insertedId });
+});
+
+app.patch("/categories/:id", verifyToken, async (req, res) => {
+  if (req.role !== "admin") {
+    return res.status(403).send({ message: "Forbidden: Admin access required" });
+  }
+
+  const { id } = req.params;
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).send({ message: "Invalid category ID" });
+  }
+
+  const { name, description, image, icon } = req.body;
+  const updates = {};
+  if (name && typeof name === "string" && name.trim()) {
+    updates.name = name.trim();
+  }
+  if (description !== undefined) updates.description = description.trim();
+  if (image !== undefined) updates.image = image.trim();
+  if (icon !== undefined) updates.icon = icon.trim();
+  updates.updatedAt = new Date();
+
+  await categoriesCollection.updateOne({ _id: new ObjectId(id) }, { $set: updates });
+
+  if (updates.name) {
+    await servicesCollection.updateMany(
+      { categoryId: id },
+      { $set: { category: updates.name } }
+    );
+  }
+
+  res.send({ message: "Category updated successfully" });
+});
+
+app.delete("/categories/:id", verifyToken, async (req, res) => {
+  if (req.role !== "admin") {
+    return res.status(403).send({ message: "Forbidden: Admin access required" });
+  }
+
+  const { id } = req.params;
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).send({ message: "Invalid category ID" });
+  }
+
+  const count = await servicesCollection.countDocuments({ categoryId: id });
+  if (count > 0) {
+    return res.status(400).send({
+      message: `Cannot delete category: ${count} service(s) are currently assigned to it.`,
+    });
+  }
+
+  await categoriesCollection.deleteOne({ _id: new ObjectId(id) });
+  res.send({ message: "Category deleted successfully" });
 });
 
 app.listen(PORT, () => {
