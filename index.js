@@ -77,7 +77,7 @@ app.get("/", (req, res) => {
   res.send({ message: "Welcome to express backend!" });
 });
 
-// Public catalog: anyone can browse services.
+// Public catalog: anyone can browse services with search, category, location, and sort params.
 app.get("/services", async (req, res) => {
   const id = req.query.id;
   if (id) {
@@ -92,7 +92,26 @@ app.get("/services", async (req, res) => {
   if (req.query.status) {
     query.status = req.query.status;
   }
-  res.send(await servicesCollection.find(query).toArray());
+  if (req.query.search && req.query.search.trim()) {
+    query.serviceName = { $regex: req.query.search.trim(), $options: "i" };
+  }
+  if (req.query.category && req.query.category !== "all") {
+    query.category = { $regex: req.query.category.trim(), $options: "i" };
+  }
+  if (req.query.location && req.query.location !== "all") {
+    query.location = { $regex: req.query.location.trim(), $options: "i" };
+  }
+
+  let sortOption = {};
+  const sort = req.query.sort;
+  if (sort === "lowest_price" || sort === "price_asc" || sort === "asc") {
+    sortOption = { price: 1 };
+  } else if (sort === "highest_price" || sort === "price_desc" || sort === "desc") {
+    sortOption = { price: -1 };
+  }
+
+  const services = await servicesCollection.find(query).sort(sortOption).toArray();
+  res.send(services);
 });
 
 app.post("/services", verifyToken, async (req, res) => {
