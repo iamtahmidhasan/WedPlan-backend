@@ -85,7 +85,13 @@ app.get("/services", async (req, res) => {
     return res.send(result);
   }
 
-  const query = req.query.vendorId ? { vendorId: req.query.vendorId } : {};
+  const query = {};
+  if (req.query.vendorId) {
+    query.vendorId = req.query.vendorId;
+  }
+  if (req.query.status) {
+    query.status = req.query.status;
+  }
   res.send(await servicesCollection.find(query).toArray());
 });
 
@@ -96,7 +102,9 @@ app.post("/services", verifyToken, async (req, res) => {
 
   const newService = {
     ...req.body,
+    status: req.role === "admin" ? (req.body.status || "approved") : "pending",
     vendorId: req.role === "admin" ? req.body.vendorId : req.userId,
+    createdAt: new Date(),
   };
   res.send(await servicesCollection.insertOne(newService));
 });
@@ -351,6 +359,9 @@ app.post("/transactions/verify", verifyToken, async (req, res) => {
       userId,
       payment_date: new Date(),
       payment_intent,
+      plan: "Lifetime Premium",
+      amount: 20,
+      currency: "USD",
     };
     const result = await transactionsCollection.insertOne(newTransaction);
     await usersCollection.updateOne(
