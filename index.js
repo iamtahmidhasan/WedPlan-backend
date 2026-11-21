@@ -406,6 +406,31 @@ app.post("/transactions/verify", verifyToken, async (req, res) => {
   res.status(400).send({ success: false, message: "Transaction failed" });
 });
 
+app.get("/vendors", async(req,res)=>{
+  const query = {role: "vendor"};
+
+  const vendors = await usersCollection.find(query).toArray();
+  
+  res.send(vendors);
+})
+app.get("/vendors/:id", verifyToken, async (req, res) => {
+  const query = { role: "vendor" };
+  const id = req.params.id;
+  if (id) {
+    if (!ObjectId.isValid(id)) {
+      return res.status(404).send({ message: "Vendor not found" });
+    }
+    query._id = new ObjectId(id);
+  }
+
+  const vendor = await usersCollection.findOne(query);
+  if (!vendor) {
+    return res.status(404).send({ message: "Vendor not found" });
+  }
+
+  res.send(vendor);
+});
+
 app.listen(PORT, () => {
   console.log("backend running on port", PORT);
 });
