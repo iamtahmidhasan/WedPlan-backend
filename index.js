@@ -285,9 +285,22 @@ app.patch("/bookings", verifyToken, async (req, res) => {
     return res.status(403).send({ message: "Forbidden" });
   }
 
+  const currentStatus = (booking.status || "pending").toLowerCase();
+
   let updateData = req.body;
   if (req.role === "customer") {
+    if (req.body.status === "cancelled" && currentStatus !== "pending") {
+      return res.status(400).send({ message: "Only pending booking requests can be cancelled" });
+    }
     if (req.body.status && !["pending", "cancelled"].includes(req.body.status)) {
+      return res.status(403).send({ message: "Forbidden" });
+    }
+  }
+  if (req.role === "vendor") {
+    if (currentStatus !== "pending") {
+      return res.status(400).send({ message: "Only pending requests can be accepted or rejected" });
+    }
+    if (req.body.status && !["accepted", "rejected"].includes(req.body.status)) {
       return res.status(403).send({ message: "Forbidden" });
     }
   }
