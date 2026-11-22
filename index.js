@@ -695,13 +695,56 @@ app.delete("/reviews/:id", verifyToken, async (req, res) => {
   res.send(result);
 });
 
+app.put("/reviews/:id", verifyToken, async (req, res) => {
+  const id = req.params.id;
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).send({ message: "Invalid review ID" });
+  }
+  const { rating, review } = req.body;
+  const query = { _id: new ObjectId(id) };
+  const existingReview = await reviewsCollection.findOne(query);
+  if (!existingReview) {
+    return res.status(404).send({ message: "Review not found" });
+  }
+  if (existingReview.user !== req.user?.email && req.role !== "admin") {
+    return res.status(403).send({ message: "Forbidden: You can only edit your own reviews" });
+  }
+  const updateDoc = {
+    $set: {
+      rating: Number(rating) || 5,
+      review: String(review || "").trim(),
+      date: new Date(),
+    },
+  };
+  const result = await reviewsCollection.updateOne(query, updateDoc);
+  res.send(result);
+});
+
 app.post("/reviews", verifyToken, async (req, res) => {
   const { serviceId, rating, review } = req.body;
+  const userEmail = req.user?.email || "Anonymous";
+
+  // Check if review already exists for this service and user
+  const existing = await reviewsCollection.findOne({ serviceId, user: userEmail });
+  if (existing) {
+    const result = await reviewsCollection.updateOne(
+      { _id: existing._id },
+      {
+        $set: {
+          rating: Number(rating) || 5,
+          review: String(review || "").trim(),
+          date: new Date(),
+        },
+      }
+    );
+    return res.send(result);
+  }
+
   const newReview = {
     serviceId,
     rating: Number(rating) || 5,
     review: String(review || "").trim(),
-    user: req.user?.email || "Anonymous",
+    user: userEmail,
     userName: req.user?.name || req.user?.email || "Customer",
     date: new Date(),
   };
