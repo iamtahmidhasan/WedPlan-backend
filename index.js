@@ -31,6 +31,7 @@ const bookingsCollection = db.collection("Bookings");
 const bookmarksCollection = db.collection("Bookmarks");
 const transactionsCollection = db.collection("Transactions");
 const categoriesCollection = db.collection("Categories");
+const reviewsCollection = db.collection("reviews");
 
 const defaultCategories = [
   {
@@ -673,6 +674,40 @@ app.delete("/categories/:id", verifyToken, async (req, res) => {
   res.send({ message: "Category deleted successfully" });
 });
 
+app.get("/reviews", async(req,res) =>{
+
+  const reviews = await reviewsCollection.find({}).toArray();
+  res.send(reviews);
+})
+app.get("/reviews/:serviceId", async(req,res) =>{
+  const id = req.params.serviceId;
+  const query = {serviceId: id};
+  const review = await reviewsCollection.find(query).toArray();
+  res.send(review);
+})
+app.delete("/reviews/:id", verifyToken, async (req, res) => {
+  if (req.role !== "admin") {
+    return res.status(403).send({ message: "Forbidden: Only admins can delete reviews" });
+  }
+  const id = req.params.id;
+  const query = { _id: new ObjectId(id) };
+  const result = await reviewsCollection.deleteOne(query);
+  res.send(result);
+});
+
+app.post("/reviews", verifyToken, async (req, res) => {
+  const { serviceId, rating, review } = req.body;
+  const newReview = {
+    serviceId,
+    rating: Number(rating) || 5,
+    review: String(review || "").trim(),
+    user: req.user?.email || "Anonymous",
+    userName: req.user?.name || req.user?.email || "Customer",
+    date: new Date(),
+  };
+  const result = await reviewsCollection.insertOne(newReview);
+  res.send(result);
+});
 
 app.post(['/ai-chat', '/api/ai-chat'], async (req, res) => {
   const { userMessage } = req.body;
