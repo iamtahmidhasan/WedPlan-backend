@@ -3,10 +3,13 @@ import cors from "cors";
 import "dotenv/config";
 import Stripe from "stripe";
 import { MongoClient, ObjectId } from "mongodb";
+import { createRemoteJWKSet, jwtVerify, importJWK } from "jose";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const app = express();
 const PORT = process.env.PORT || 5000;
+const FRONTEND_URL = process.env.FRONTEND_URL;
+const JWKS = createRemoteJWKSet(new URL(`${FRONTEND_URL}/api/auth/jwks`));
 app.use(express.json());
 app.use(cors({ allowedHeaders: ["Content-Type", "Authorization"] }));
 const DB_URI = process.env.DATABASE_URL;
@@ -32,6 +35,7 @@ const bookmarksCollection = db.collection("Bookmarks");
 const transactionsCollection = db.collection("Transactions");
 const categoriesCollection = db.collection("Categories");
 const reviewsCollection = db.collection("reviews");
+const jwksCollection = db.collection("jwks");
 
 const defaultCategories = [
   {
@@ -137,18 +141,70 @@ const verifyToken = async (req, res, next) => {
   }
 
   const token = header.split(" ")[1];
-  const session = await sessionsCollection.findOne({ token });
-  if (
-    !session ||
-    !session.expiresAt ||
-    new Date(session.expiresAt) <= new Date()
-  ) {
-    return res.status(401).send({ message: "Unauthorized" });
+  let userId = null;
+  let userEmail = null;
+
+  // 1. If token is a JWT (three dot-separated segments)
+  if (token.split(".").length === 3) {
+    try {
+      const { payload } = await jwtVerify(token, JWKS);
+      userId = payload.sub || payload.id;
+      userEmail = payload.email;
+    } catch {
+      // Fallback: verify against stored jwks collection
+      try {
+        const keys = await jwksCollection.find({}).toArray();
+        let verified = false;
+        for (const k of keys) {
+          try {
+            const keyObj =
+              typeof k.publicKey === "string"
+                ? JSON.parse(k.publicKey)
+                : k.publicKey;
+            const key = await importJWK(keyObj);
+            const { payload } = await jwtVerify(token, key);
+            userId = payload.sub || payload.id;
+            userEmail = payload.email;
+            verified = true;
+            break;
+          } catch {}
+        }
+        if (!verified) {
+          return res.status(401).send({ message: "Unauthorized: Invalid JWT" });
+        }
+      } catch {
+        return res.status(401).send({ message: "Unauthorized: Invalid JWT" });
+      }
+    }
+  } else {
+    // 2. Legacy session token fallback
+    const session = await sessionsCollection.findOne({ token });
+    if (
+      !session ||
+      !session.expiresAt ||
+      new Date(session.expiresAt) <= new Date()
+    ) {
+      return res.status(401).send({ message: "Unauthorized" });
+    }
+    userId = session.userId;
   }
 
-  const user = await usersCollection.findOne({
-    _id: new ObjectId(session.userId),
-  });
+  const queryConditions = [];
+  if (userId && ObjectId.isValid(userId)) {
+    queryConditions.push({ _id: new ObjectId(userId) });
+  }
+  if (userId) {
+    queryConditions.push({ id: userId });
+  }
+  if (userEmail) {
+    queryConditions.push({ email: userEmail });
+  }
+
+  const user =
+    queryConditions.length > 0
+      ? await usersCollection.findOne({ $or: queryConditions })
+      : null;
+
   if (!user) return res.status(401).send({ message: "Unauthorized" });
   if (user.isBlocked) {
     return res.status(403).send({ message: "Account blocked" });
