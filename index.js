@@ -441,11 +441,17 @@ app.patch("/bookings", verifyToken, async (req, res) => {
     }
   }
   if (req.role === "vendor") {
-    if (currentStatus !== "pending") {
-      return res.status(400).send({ message: "Only pending requests can be accepted or rejected" });
-    }
-    if (req.body.status && !["accepted", "rejected"].includes(req.body.status)) {
-      return res.status(403).send({ message: "Forbidden" });
+    if (req.body.status === "completed") {
+      if (currentStatus !== "accepted") {
+        return res.status(400).send({ message: "Only accepted bookings can be marked as completed" });
+      }
+    } else {
+      if (currentStatus !== "pending") {
+        return res.status(400).send({ message: "Only pending requests can be accepted or rejected" });
+      }
+      if (req.body.status && !["accepted", "rejected", "completed"].includes(req.body.status)) {
+        return res.status(403).send({ message: "Forbidden" });
+      }
     }
   }
   if (req.role !== "admin") {
