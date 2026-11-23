@@ -139,7 +139,13 @@ app.get("/", (req, res) => {
 app.get("/services", async (req, res) => {
   const id = req.query.id;
   if (id) {
+    if (!ObjectId.isValid(id)) {
+      return res.status(404).send({ error: "Invalid service ID" });
+    }
     const result = await servicesCollection.findOne({ _id: new ObjectId(id) });
+    if (!result) {
+      return res.status(404).send({ error: "Service not found" });
+    }
     return res.send(result);
   }
 
@@ -374,11 +380,67 @@ app.get("/bookings", verifyToken, async (req, res) => {
 
 app.post("/bookings", verifyToken, async (req, res) => {
   if (req.role !== "customer") {
-    return res.status(403).send({ message: "Forbidden" });
+    return res.status(403).send({ message: "Only customers can submit booking requests" });
   }
 
-  const newBooking = { ...req.body, customerId: req.userId };
-  res.send(await bookingsCollection.insertOne(newBooking));
+  const { serviceId, eventDate, eventLocation, message } = req.body;
+  if (!serviceId) {
+    return res.status(400).send({ message: "Service ID is required" });
+  }
+
+  if (!ObjectId.isValid(serviceId)) {
+    return res.status(400).send({ message: "Invalid service ID" });
+  }
+
+  const service = await servicesCollection.findOne({ _id: new ObjectId(serviceId) });
+  if (!service) {
+    return res.status(404).send({ message: "Service not found" });
+  }
+
+  // Spec rule: Only approved and active services are available for booking
+  if (service.status && service.status !== "approved") {
+    return res.status(400).send({ message: "Only approved and active services are available for booking" });
+  }
+
+  // Spec rule: Vendors cannot book their own services
+  if (service.vendorId === req.userId) {
+    return res.status(400).send({ message: "Vendors cannot book their own services" });
+  }
+
+  // Spec rule: Prevent duplicate active booking requests for the same service and event date
+  if (eventDate) {
+    const existingActiveBooking = await bookingsCollection.findOne({
+      serviceId: String(service._id),
+      customerId: req.userId,
+      eventDate: String(eventDate).trim(),
+      status: { $in: ["pending", "accepted", "confirmed"] },
+    });
+
+    if (existingActiveBooking) {
+      return res.status(400).send({
+        message: "You already have an active booking request for this service on this event date",
+      });
+    }
+  }
+
+  // Spec rule: Automatically identify Customer and Selected Vendor. Store default status: Pending.
+  const newBooking = {
+    serviceId: String(service._id),
+    serviceName: service.serviceName,
+    vendorId: service.vendorId,
+    customerId: req.userId,
+    customerEmail: req.user?.email || "",
+    customerName: req.user?.name || req.user?.email || "Customer",
+    eventDate: eventDate ? String(eventDate).trim() : "",
+    eventLocation: eventLocation ? String(eventLocation).trim() : (service.location || ""),
+    message: message ? String(message).trim() : "",
+    price: service.price,
+    status: "pending",
+    createdAt: new Date(),
+  };
+
+  const result = await bookingsCollection.insertOne(newBooking);
+  res.status(201).send({ ...newBooking, _id: result.insertedId });
 });
 
 app.patch("/bookings", verifyToken, async (req, res) => {
@@ -523,17 +585,22 @@ app.get("/vendors", async(req,res)=>{
   
   res.send(vendors);
 })
-app.get("/vendors/:id", verifyToken, async (req, res) => {
-  const query = { role: "vendor" };
+app.get("/vendors/:id", async (req, res) => {
   const id = req.params.id;
-  if (id) {
-    if (!ObjectId.isValid(id)) {
-      return res.status(404).send({ message: "Vendor not found" });
-    }
-    query._id = new ObjectId(id);
+  if (!id) {
+    return res.status(404).send({ message: "Vendor not found" });
   }
 
-  const vendor = await usersCollection.findOne(query);
+  const orConditions = [{ id: id }];
+  if (ObjectId.isValid(id)) {
+    orConditions.push({ _id: new ObjectId(id) });
+  }
+
+  const vendor = await usersCollection.findOne(
+    { $or: orConditions, role: "vendor" },
+    { projection: { password: 0, hashedPassword: 0 } }
+  );
+
   if (!vendor) {
     return res.status(404).send({ message: "Vendor not found" });
   }
