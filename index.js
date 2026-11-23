@@ -192,6 +192,23 @@ app.post("/services", verifyToken, async (req, res) => {
     return res.status(403).send({ message: "Forbidden" });
   }
 
+  // Spec rule: Free vendors can publish a maximum of 3 active services. Premium vendors can publish unlimited services.
+  if (req.role !== "admin") {
+    const isPremium = Boolean(req.user?.isPremium);
+    if (!isPremium) {
+      const activeCount = await servicesCollection.countDocuments({
+        vendorId: req.userId,
+        status: { $ne: "rejected" },
+      });
+      if (activeCount >= 3) {
+        return res.status(403).send({
+          message: "Free vendors can publish a maximum of 3 active services. Upgrade to Premium for unlimited publishing.",
+          limitReached: true,
+        });
+      }
+    }
+  }
+
   let categoryId = req.body.categoryId;
   let categoryName = req.body.category;
 
@@ -503,6 +520,10 @@ app.delete("/bookings", verifyToken, async (req, res) => {
 });
 
 app.get("/bookmarks", verifyToken, async (req, res) => {
+  if (req.role !== "customer") {
+    return res.status(403).send({ message: "Only customers have access to saved bookmarks" });
+  }
+
   const query = { userId: req.userId };
   const id = req.query.id;
   if (id) {
@@ -519,11 +540,19 @@ app.get("/bookmarks", verifyToken, async (req, res) => {
 });
 
 app.post("/bookmarks", verifyToken, async (req, res) => {
+  if (req.role !== "customer") {
+    return res.status(403).send({ message: "Only customers can bookmark wedding services" });
+  }
+
   const newBookmark = { ...req.body, userId: req.userId };
   res.send(await bookmarksCollection.insertOne(newBookmark));
 });
 
 app.delete("/bookmarks", verifyToken, async (req, res) => {
+  if (req.role !== "customer") {
+    return res.status(403).send({ message: "Forbidden" });
+  }
+
   res.send(
     await bookmarksCollection.deleteOne({
       _id: new ObjectId(req.query.id),
